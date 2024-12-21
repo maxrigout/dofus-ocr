@@ -3,6 +3,10 @@ from tkinter import ttk
 from pynput import mouse
 from PIL import ImageGrab
 import pytesseract
+import requests
+import unicodedata
+import re
+import Levenshtein as lev
 from googletrans import Translator
 import pyperclip
 import threading
@@ -21,6 +25,10 @@ class BoundingBoxManager:
             self.bounding_box.append((x, y))
             if len(self.bounding_box) == 2:
                 print("Both points captured.")
+                # Dynamic bounding box corners to allow more flexible corner selection
+                x1,y1 = self.bounding_box[0]
+                x2, y2 = self.bounding_box[1]
+                self.bounding_box = ((min(x1,x2), min(y1,y2)),(max(x1,x2), max(y1,y2)))
                 self.update_ui_with_bounding_box()
                 self.listener.stop()
 
@@ -49,6 +57,8 @@ class OCRManager:
         self.bounding_box_manager = bounding_box_manager
         self.polling = False
         self.translator = Translator(service_urls=['translate.googleapis.com'])
+        self.previous_capture = ''
+        self.CAPTURE_THRESHOLD = 0.97
 
     def capture_and_ocr(self):
         if len(self.bounding_box_manager.bounding_box) == 2:
@@ -59,7 +69,11 @@ class OCRManager:
 
                 image = ImageGrab.grab(bbox=bbox)
                 text = pytesseract.image_to_string(image)
-                return text
+                if(capture_similarity(self.previous_capture, text)) < self.CAPTURE_THRESHOLD:
+                    self.previous_capture = text
+                    return text
+                else:
+                    return None
             except Exception as e:
                 print(f"Error during OCR capture: {e}")
                 return ""
@@ -83,13 +97,19 @@ class OCRManager:
         self.polling = True
 
         def poll():
+            global match_array
+            match_array = []
+            pattern = r"\[(.*?)\]"
             while self.polling:
                 try:
+                    match_array = []
                     text = self.capture_and_ocr()
                     if text:
+                        text = re.sub(pattern, tokenize, text)
                         translated_text = self.translate_text(text, source_language, target_language)
+                        translated_text = translated_text.format(*translate_named_items(match_array))
                         chat_box.delete('1.0', 'end')
-                        chat_box.insert('end', f"{translated_text}\n")
+                        chat_box.insert('end', f"{translated_text.replace('\n\n', '\n')}\n")
                         chat_box.see('end')
                     time.sleep(3)
                 except Exception as e:
@@ -101,6 +121,56 @@ class OCRManager:
     def stop_ocr_polling(self):
         self.polling = False
 
+# OCR has a tendency to vary its space length and newlines, clean up with this.
+def preprocess_string(string):
+    return ' '.join(string.replace('\n', ' ').split())
+
+# Levenshtein ratio to gauge whether the translation pipeline needs to re-execute on the new capture
+def capture_similarity(a, b):
+    ratio = lev.ratio(preprocess_string(a), preprocess_string(b))
+    print(ratio)
+    return ratio
+
+def tokenize(match):
+    global match_array
+
+    # Store bracket contents
+    match_array.append(match.group(1))
+
+    # Placeholder token that won't get translated out
+    return "{}"
+
+
+# Normalizer for french text, necessary for API calls
+def remove_french_accents(string):
+
+    normalized = unicodedata.normalize('NFD', string)
+    # Filter out accents (combining diacritical marks)
+    stripped = ''.join(c for c in normalized if not unicodedata.combining(c))
+    # Return the normalized string
+    return stripped
+
+# Use DofusDB to get exact bracket-item translation
+def translate_named_items(name_list):
+    def pad(string):
+        return f'[{string}]'
+    translated_list = []
+    for item_name in name_list:
+        
+        response = requests.get(
+            f'https://api.beta.dofusdb.fr/items?slug.fr[$search]={remove_french_accents(item_name)}'
+            ) \
+            .json()
+        if len(response['data']) > 0:
+            translated_list.append(pad(response['data'][0]['name'][target_language]))
+        else:
+            translated_list.append(pad(item_name))
+    return translated_list
+
+
+
+
+
 # Initialize managers
 bounding_box_manager = BoundingBoxManager()
 ocr_manager = OCRManager(bounding_box_manager)
@@ -111,8 +181,8 @@ root.title("Chat Translation App")
 
 # Language Selection
 ttk.Label(root, text="Source Language").grid(row=0, column=0)
-source_language_dropdown = ttk.Combobox(root, values=["en", "es", "fr", "de"])
-source_language_dropdown.set("en")
+source_language_dropdown = ttk.Combobox(root, values=["en", "es", "fr", "de", "pt"])
+source_language_dropdown.set("fr")
 source_language_dropdown.grid(row=0, column=1)
 
 def update_source_language(event):
@@ -120,10 +190,11 @@ def update_source_language(event):
     source_language = source_language_dropdown.get()
 
 source_language_dropdown.bind("<<ComboboxSelected>>", update_source_language)
+update_source_language(None)
 
 ttk.Label(root, text="Target Language").grid(row=1, column=0)
-target_language_dropdown = ttk.Combobox(root, values=["en", "es", "fr", "de"])
-target_language_dropdown.set("es")
+target_language_dropdown = ttk.Combobox(root, values=["en", "es", "fr", "de", "pt"])
+target_language_dropdown.set("en")
 target_language_dropdown.grid(row=1, column=1)
 
 def update_target_language(event):
@@ -131,6 +202,7 @@ def update_target_language(event):
     target_language = target_language_dropdown.get()
 
 target_language_dropdown.bind("<<ComboboxSelected>>", update_target_language)
+update_target_language(None)
 
 # Buttons
 ttk.Button(root, text="Set Bounding Box", command=bounding_box_manager.set_bounding_box).grid(row=2, column=0, columnspan=2, pady=5)
