@@ -8,6 +8,8 @@ This open-source, free app aims at bridging the language barrier inherent to the
 
 If you wish, you may find the latest executable directly under [releases](https://github.com/Eliott-Mischler/dofus-ocr/releases), note that this is inherently unsafe, and I do not recommend it. 
 
+This executable requires no extra steps to run on a Windows machine. 
+
 ## Run (Windows instructions)
 
 Below are the steps to running this app yourself without downloading an executable.
