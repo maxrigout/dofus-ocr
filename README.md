@@ -6,7 +6,7 @@ This open-source, free app aims at bridging the language barrier inherent to the
 
 ## Executable
 
-If you wish, you may find an executable directly under `releases`, note that this is inherently unsafe, and I do not recommend it. 
+If you wish, you may find the latest executable directly under [releases](https://github.com/Eliott-Mischler/dofus-ocr/releases), note that this is inherently unsafe, and I do not recommend it. 
 
 ## Run (Windows instructions)
 
