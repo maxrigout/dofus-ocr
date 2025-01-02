@@ -277,12 +277,13 @@ def writeFile(fileName, data):
         file.write(data)
 
 previousBoundingBoxTxt = readFile(bounding_box_file_name)
-coords = previousBoundingBoxTxt.split(",")
-coords[0] = int(coords[0].strip()[2:])
-coords[1] = int(coords[1].strip()[:-1])
-coords[2] = int(coords[2].strip()[1:])
-coords[3] = int(coords[3].strip()[:-2])
+if previousBoundingBoxTxt != "":
+    coords = previousBoundingBoxTxt.split(",")
+    coords[0] = int(coords[0].strip()[2:])
+    coords[1] = int(coords[1].strip()[:-1])
+    coords[2] = int(coords[2].strip()[1:])
+    coords[3] = int(coords[3].strip()[:-2])
 
-bounding_box_manager.set_bounding_box(((coords[0], coords[1]),(coords[2], coords[3])))
+    bounding_box_manager.set_bounding_box(((coords[0], coords[1]),(coords[2], coords[3])))
 
 root.mainloop()
