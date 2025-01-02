@@ -12,19 +12,37 @@ import pyperclip
 import threading
 import time
 
+bounding_box_file_name = "bounding_box.txt"
+
+
+class Logger:
+    def __init__(self, tkText):
+        self.tkText = tkText
+
+    def setElement(self, tkText):
+        self.tkText = tkText
+
+    def log(self, msg):
+        print(msg)
+        self.tkText.insert("1.0", msg + "\n")
+
+    def error(self, msg):
+        self.log("[ERROR]" + msg)
+
 class BoundingBoxManager:
-    def __init__(self):
+    def __init__(self, logger):
         self.bounding_box = []
         self.bounding_box_set = False
         self.listener_thread = None
         self.listener = None
+        self.logger = logger
 
     def on_click(self, x, y, _, pressed):
         if pressed:
-            print(f"Mouse pressed at: ({x}, {y})")
+            self.logger.log(f"Mouse pressed at: ({x}, {y})")
             self.bounding_box.append((x, y))
             if len(self.bounding_box) == 2:
-                print("Both points captured.")
+                self.logger.log("Both points captured.")
                 # Dynamic bounding box corners to allow more flexible corner selection
                 x1,y1 = self.bounding_box[0]
                 x2, y2 = self.bounding_box[1]
@@ -33,32 +51,41 @@ class BoundingBoxManager:
                 self.listener.stop()
 
     def update_ui_with_bounding_box(self):
-        print(f"Bounding box set: {self.bounding_box}")
+        self.logger.log(f"Bounding box set: {self.bounding_box}")
+        writeFile(bounding_box_file_name, str(self.bounding_box))
         self.bounding_box_set = True
 
-    def set_bounding_box(self):
-        self.bounding_box = []
-        self.bounding_box_set = False
+    def set_bounding_box(self, bounding_box=None):
+        if bounding_box is None:
+            self.bounding_box = []
+            self.bounding_box_set = False
+            self.spawn_mouse_listening_thread()
+        else:
+            self.bounding_box = bounding_box
+            self.bounding_box_set = True
+            self.logger.log(f"loaded bounding box: {self.bounding_box}")
 
+    def spawn_mouse_listening_thread(self):
         def start_listener():
-            print("Click two points to set the bounding box...")
+            self.logger.log("Click two points to set the bounding box...")
             try:
                 self.listener = mouse.Listener(on_click=self.on_click)
                 self.listener.start()
                 self.listener.join()
             except Exception as e:
-                print(f"Error with listener: {e}")
+                self.logger.log(f"Error with listener: {e}")
 
         self.listener_thread = threading.Thread(target=start_listener, daemon=True)
         self.listener_thread.start()
 
 class OCRManager:
-    def __init__(self, bounding_box_manager):
+    def __init__(self, bounding_box_manager, logger):
         self.bounding_box_manager = bounding_box_manager
         self.polling = False
         self.translator = Translator(service_urls=['translate.googleapis.com'])
         self.previous_capture = ''
         self.CAPTURE_THRESHOLD = 0.97
+        self.logger = logger
 
     def capture_and_ocr(self):
         if len(self.bounding_box_manager.bounding_box) == 2:
@@ -75,10 +102,10 @@ class OCRManager:
                 else:
                     return None
             except Exception as e:
-                print(f"Error during OCR capture: {e}")
+                self.logger.error(f"Error during OCR capture: {e}")
                 return ""
         else:
-            print("Bounding box not set!")
+            self.logger.log("Bounding box not set!")
             return ""
 
     def translate_text(self, text, src_lang, tgt_lang):
@@ -86,12 +113,12 @@ class OCRManager:
             translation = self.translator.translate(text, src=src_lang, dest=tgt_lang)
             return translation.text
         except Exception as e:
-            print(f"Translation error: {e}")
+            self.logger.error(f"Translation error: {e}")
             return ""
 
     def start_ocr_polling(self):
         if not self.bounding_box_manager.bounding_box_set:
-            print("Bounding box not set!")
+            self.logger.log("Bounding box not set!")
             return
 
         self.polling = True
@@ -113,7 +140,7 @@ class OCRManager:
                         chat_box.see('end')
                     time.sleep(3)
                 except Exception as e:
-                    print(f"Error during OCR polling: {e}")
+                    self.logger.error(f"Error during OCR polling: {e}")
 
         thread = threading.Thread(target=poll, daemon=True)
         thread.start()
@@ -172,8 +199,9 @@ def translate_named_items(name_list):
 
 
 # Initialize managers
-bounding_box_manager = BoundingBoxManager()
-ocr_manager = OCRManager(bounding_box_manager)
+logger = Logger(None)
+bounding_box_manager = BoundingBoxManager(logger)
+ocr_manager = OCRManager(bounding_box_manager, logger)
 
 # Create the UI
 root = tk.Tk()
@@ -204,6 +232,12 @@ def update_target_language(event):
 target_language_dropdown.bind("<<ComboboxSelected>>", update_target_language)
 update_target_language(None)
 
+# Log
+log_box = tk.Text(root, height=6, width=50)
+log_box.grid(row=0, column=2, rowspan=4, columnspan=2)
+
+logger.setElement(log_box)
+
 # Buttons
 ttk.Button(root, text="Set Bounding Box", command=bounding_box_manager.set_bounding_box).grid(row=2, column=0, columnspan=2, pady=5)
 ttk.Button(root, text="Start OCR", command=ocr_manager.start_ocr_polling).grid(row=3, column=0, pady=5)
@@ -228,5 +262,27 @@ def copy_translated_message():
         print(f"Translated message copied: {translated_message}")
 
 ttk.Button(root, text="Copy Translated", command=copy_translated_message).grid(row=7, column=1, pady=5)
+
+
+# load previous bounding box
+def readFile(fileName):
+    try:
+        with open(fileName, 'r') as file:
+            return file.read()
+    except Exception as e:
+        return ""
+
+def writeFile(fileName, data):
+    with open(fileName, 'w') as file:
+        file.write(data)
+
+previousBoundingBoxTxt = readFile(bounding_box_file_name)
+coords = previousBoundingBoxTxt.split(",")
+coords[0] = int(coords[0].strip()[2:])
+coords[1] = int(coords[1].strip()[:-1])
+coords[2] = int(coords[2].strip()[1:])
+coords[3] = int(coords[3].strip()[:-2])
+
+bounding_box_manager.set_bounding_box(((coords[0], coords[1]),(coords[2], coords[3])))
 
 root.mainloop()
