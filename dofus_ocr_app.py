@@ -270,10 +270,32 @@ logger.setElement(log_box)
 bounding_box_text=tk.StringVar()
 ttk.Button(root, text="Set Bounding Box", command=bounding_box_manager.set_bounding_box).grid(row=2, column=0, pady=5)
 ttk.Label(root, textvariable=bounding_box_text).grid(row=2, column=1, pady=5)
+
+# Start/Stop OCR Button
 start_stop_ocr_btn_text=tk.StringVar()
 start_stop_ocr_btn_text.set("Start OCR")
 start_stop_ocr_btn=tk.Button(root, textvariable=start_stop_ocr_btn_text, command=ocr_manager.on_ocr_start_stop)
 start_stop_ocr_btn.grid(row=3, column=0, pady=5)
+
+# Lock to Foreground Button
+is_locked_to_foreground = root.attributes("-topmost")
+def lock_to_foreground():
+    global is_locked_to_foreground
+    is_locked_to_foreground = not(is_locked_to_foreground)
+    root.attributes("-topmost", is_locked_to_foreground)
+    if is_locked_to_foreground:
+        bg_color="red"
+        txt="Locked to Foreground"
+    else:
+        bg_color="white"
+        txt="Lock to Foreground"
+    lock_to_foreground_btn.config(bg=bg_color)
+    lock_to_foreground_btn_text.set(txt)
+
+lock_to_foreground_btn_text=tk.StringVar()
+lock_to_foreground_btn_text.set("Lock to Foreground")
+lock_to_foreground_btn = tk.Button(root, textvariable=lock_to_foreground_btn_text, command=lock_to_foreground)
+lock_to_foreground_btn.grid(row=3, column=1)
 
 
 # Chat Box
