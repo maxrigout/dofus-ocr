@@ -16,18 +16,34 @@ bounding_box_file_name = "bounding_box.txt"
 
 
 class Logger:
-    def __init__(self, tkText):
-        self.tkText = tkText
+    def __init__(self, tk_text):
+        self.tk_text = tk_text
 
-    def setElement(self, tkText):
-        self.tkText = tkText
+    def setElement(self, tk_text):
+        self.tk_text = tk_text
 
     def log(self, msg):
         print(msg)
-        self.tkText.insert("1.0", msg + "\n")
+        self.tk_text.insert("1.0", f"{msg}\n")
 
     def error(self, msg):
-        self.log("[ERROR]" + msg)
+        self.log(f"[ERROR]: {msg}")
+
+class LanguageManager:
+    def __init__(self, logger, languages, default="fr"):
+        self.logger = logger
+        self.languages = languages
+        self.current_language=default
+
+    def get_current_language(self):
+        return self.current_language
+    
+    def set_current_language(self, lang):
+        self.logger.log(f"selected: {lang}")
+        self.current_language = lang
+
+    def get_languages(self):
+        return self.languages
 
 class BoundingBoxManager:
     def __init__(self, logger):
@@ -53,6 +69,7 @@ class BoundingBoxManager:
     def update_ui_with_bounding_box(self):
         self.logger.log(f"Bounding box set: {self.bounding_box}")
         writeFile(bounding_box_file_name, str(self.bounding_box))
+        bounding_box_text.set(f"current bounding box: {self.bounding_box}")
         self.bounding_box_set = True
 
     def set_bounding_box(self, bounding_box=None):
@@ -64,6 +81,7 @@ class BoundingBoxManager:
             self.bounding_box = bounding_box
             self.bounding_box_set = True
             self.logger.log(f"loaded bounding box: {self.bounding_box}")
+            bounding_box_text.set(f"current bounding box: {self.bounding_box}")
 
     def spawn_mouse_listening_thread(self):
         def start_listener():
@@ -73,19 +91,21 @@ class BoundingBoxManager:
                 self.listener.start()
                 self.listener.join()
             except Exception as e:
-                self.logger.log(f"Error with listener: {e}")
+                self.logger.error(f"Error with listener: {e}")
 
         self.listener_thread = threading.Thread(target=start_listener, daemon=True)
         self.listener_thread.start()
 
 class OCRManager:
-    def __init__(self, bounding_box_manager, logger):
+    def __init__(self, bounding_box_manager, logger, source_language_manager, target_language_manager):
         self.bounding_box_manager = bounding_box_manager
         self.polling = False
         self.translator = Translator(service_urls=['translate.googleapis.com'])
         self.previous_capture = ''
         self.CAPTURE_THRESHOLD = 0.97
         self.logger = logger
+        self.source_language_manager = source_language_manager
+        self.target_language_manager = target_language_manager
 
     def capture_and_ocr(self):
         if len(self.bounding_box_manager.bounding_box) == 2:
@@ -115,6 +135,16 @@ class OCRManager:
         except Exception as e:
             self.logger.error(f"Translation error: {e}")
             return ""
+        
+    def on_ocr_start_stop(self):
+        if self.polling:
+            self.stop_ocr_polling()
+            start_stop_ocr_btn_text.set("Start OCR")
+            start_stop_ocr_btn.config(bg="white")
+        else:
+            self.start_ocr_polling()
+            start_stop_ocr_btn_text.set("Stop OCR")
+            start_stop_ocr_btn.config(bg="light green")
 
     def start_ocr_polling(self):
         if not self.bounding_box_manager.bounding_box_set:
@@ -133,7 +163,7 @@ class OCRManager:
                     text = self.capture_and_ocr()
                     if text:
                         text = re.sub(pattern, tokenize, text)
-                        translated_text = self.translate_text(text, source_language, target_language)
+                        translated_text = self.translate_text(text, self.source_language_manager.get_current_language(), self.target_language_manager.get_current_language())
                         translated_text = translated_text.format(*translate_named_items(match_array))
                         chat_box.delete('1.0', 'end')
                         chat_box.insert('end', f"{translated_text.replace('\n\n', '\n')}\n")
@@ -189,7 +219,7 @@ def translate_named_items(name_list):
             ) \
             .json()
         if len(response['data']) > 0:
-            translated_list.append(pad(response['data'][0]['name'][target_language]))
+            translated_list.append(pad(response['data'][0]['name'][target_language_manager.get_current_language()]))
         else:
             translated_list.append(pad(item_name))
     return translated_list
@@ -201,7 +231,9 @@ def translate_named_items(name_list):
 # Initialize managers
 logger = Logger(None)
 bounding_box_manager = BoundingBoxManager(logger)
-ocr_manager = OCRManager(bounding_box_manager, logger)
+source_language_manager = LanguageManager(logger, ["en", "es", "fr", "de", "pt"], "fr")
+target_language_manager = LanguageManager(logger, ["en", "es", "fr", "de", "pt"], "en")
+ocr_manager = OCRManager(bounding_box_manager, logger, source_language_manager, target_language_manager)
 
 # Create the UI
 root = tk.Tk()
@@ -209,16 +241,14 @@ root.title("Chat Translation App")
 
 # Language Selection
 ttk.Label(root, text="Source Language").grid(row=0, column=0)
-source_language_dropdown = ttk.Combobox(root, values=["en", "es", "fr", "de", "pt"])
-source_language_dropdown.set("fr")
+source_language_dropdown = ttk.Combobox(root, values=source_language_manager.get_languages())
+source_language_dropdown.set(source_language_manager.get_current_language())
 source_language_dropdown.grid(row=0, column=1)
 
 def update_source_language(event):
-    global source_language
-    source_language = source_language_dropdown.get()
+    source_language_manager.set_current_language(source_language_dropdown.get())
 
 source_language_dropdown.bind("<<ComboboxSelected>>", update_source_language)
-update_source_language(None)
 
 ttk.Label(root, text="Target Language").grid(row=1, column=0)
 target_language_dropdown = ttk.Combobox(root, values=["en", "es", "fr", "de", "pt"])
@@ -226,11 +256,9 @@ target_language_dropdown.set("en")
 target_language_dropdown.grid(row=1, column=1)
 
 def update_target_language(event):
-    global target_language
-    target_language = target_language_dropdown.get()
+    target_language_manager.set_current_language(target_language_dropdown.get())
 
 target_language_dropdown.bind("<<ComboboxSelected>>", update_target_language)
-update_target_language(None)
 
 # Log
 log_box = tk.Text(root, height=6, width=50)
@@ -239,29 +267,36 @@ log_box.grid(row=0, column=2, rowspan=4, columnspan=2)
 logger.setElement(log_box)
 
 # Buttons
-ttk.Button(root, text="Set Bounding Box", command=bounding_box_manager.set_bounding_box).grid(row=2, column=0, columnspan=2, pady=5)
-ttk.Button(root, text="Start OCR", command=ocr_manager.start_ocr_polling).grid(row=3, column=0, pady=5)
-ttk.Button(root, text="Stop OCR", command=ocr_manager.stop_ocr_polling).grid(row=3, column=1, pady=5)
+bounding_box_text=tk.StringVar()
+ttk.Button(root, text="Set Bounding Box", command=bounding_box_manager.set_bounding_box).grid(row=2, column=0, pady=5)
+ttk.Label(root, textvariable=bounding_box_text).grid(row=2, column=1, pady=5)
+start_stop_ocr_btn_text=tk.StringVar()
+start_stop_ocr_btn_text.set("Start OCR")
+start_stop_ocr_btn=tk.Button(root, textvariable=start_stop_ocr_btn_text, command=ocr_manager.on_ocr_start_stop)
+start_stop_ocr_btn.grid(row=3, column=0, pady=5)
 
 
 # Chat Box
-ttk.Label(root, text="Translated Content").grid(row=4, column=0)
+ttk.Label(root, text="Translated Content:").grid(row=4, column=0)
 chat_box = tk.Text(root, height=20, width=100)
-chat_box.grid(row=4, column=1, columnspan=2, pady=5)
+chat_box.grid(row=5, column=0, columnspan=3, pady=5)
 
 # User Input
-ttk.Label(root, text="Write message").grid(row=5, column=0)
+ttk.Label(root, text="Write message").grid(row=6, column=0)
 user_input_field = tk.Entry(root, width=40)
-user_input_field.grid(row=5, column=1, pady=5)
+user_input_field.grid(row=6, column=1, pady=5)
 
 def copy_translated_message():
     user_message = user_input_field.get()
     if user_message:
-        translated_message = ocr_manager.translate_text(user_message, target_language, source_language)
+        translated_message = ocr_manager.translate_text(user_message, target_language_manager.get_current_language(), source_language_manager.get_current_language())
         pyperclip.copy(translated_message)
         print(f"Translated message copied: {translated_message}")
 
 ttk.Button(root, text="Copy Translated", command=copy_translated_message).grid(row=7, column=1, pady=5)
+
+update_source_language(None)
+update_target_language(None)
 
 
 # load previous bounding box
